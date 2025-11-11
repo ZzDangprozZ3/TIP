@@ -27,24 +27,31 @@ dataset = torchvision.datasets.ImageFolder(root='train', transform=transform)
 
 
 class Net(nn.Module):
-    def __init__(self):
+    def __init__(self, input_size=(3, 224, 224)):
         super().__init__()
         self.conv1 = nn.Conv2d(3, 6, 5)
         self.pool = nn.MaxPool2d(4, 4)
         self.conv2 = nn.Conv2d(6, 16, 5)
-        self.fc1 = nn.Linear(16 * 30 * 30, 120)
+
+        # Tính kích thước flatten động bằng một dummy forward pass (CPU)
+        with torch.no_grad():
+            dummy = torch.zeros(1, *input_size)
+            x = self.pool(F.relu(self.conv1(dummy)))
+            x = self.pool(F.relu(self.conv2(x)))
+            flatten_dim = x.numel()  # channels * H * W
+
+        self.fc1 = nn.Linear(flatten_dim, 120)
         self.fc2 = nn.Linear(120, 84)
         self.fc3 = nn.Linear(84, 11)
 
     def forward(self, x):
         x = self.pool(F.relu(self.conv1(x)))
         x = self.pool(F.relu(self.conv2(x)))
-        x = torch.flatten(x, 1) # flatten all dimensions except batch
+        x = torch.flatten(x, 1)  # flatten tất cả ngoại trừ batch
         x = F.relu(self.fc1(x))
         x = F.relu(self.fc2(x))
         x = self.fc3(x)
         return x
-# functions to show an image
 
 
 def train(dataloader, model, criterion, optimizer,device):
@@ -95,13 +102,15 @@ def test(dataloader, model, loss_fn):
     
 
 if __name__ == '__main__':
-    device = torch.accelerator.current_accelerator().type if torch.accelerator.is_available() else "cpu"
-    # device = torch.device("cpu")
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(device)
-    model = efficientnet_b0()
-    num_classes = 11
-    model.classifier[1] = nn.Linear(model.classifier[1].in_features, num_classes)
-    model.load_state_dict(torch.load("modelCNN.pth", weights_only=True))
+    # weights=EfficientNet_B0_Weights.IMAGENET1K_V1
+    # model = efficientnet_b0(weights)  #Mettez weight dans le parametre pour utiliser le pretrained
+    # num_classes = 11
+    # model.classifier[1] = nn.Linear(model.classifier[1].in_features, num_classes)
+    model = Net()
+
+    # model.load_state_dict(torch.load("modelCNN.pth", weights_only=True))
     model=model.to(device)
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(model.parameters(), lr=0.001, momentum=0.9)
@@ -112,11 +121,11 @@ if __name__ == '__main__':
     for fold, (train_idx, val_idx) in enumerate(kfold.split(dataset)):
         print(f'FOLD {fold}')
         print('--------------------------------')
-        # Tạo subset cho train và val
+        # Create subset cho train và val
         train_subset = torch.utils.data.Subset(dataset, train_idx)
         val_subset   = torch.utils.data.Subset(dataset, val_idx)
 
-        # Tạo dataloader
+        # Create dataloader
         train_loader = torch.utils.data.DataLoader(train_subset, batch_size=32, shuffle=True)
         val_loader   = torch.utils.data.DataLoader(val_subset, batch_size=32, shuffle=False)
         for epoch in range(3):  # loop over the dataset multiple times
